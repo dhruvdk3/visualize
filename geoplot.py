@@ -342,3 +342,4 @@ class GeoPlot:
                     }
                 )
             )
+
