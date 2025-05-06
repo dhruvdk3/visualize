@@ -1,3 +1,4 @@
+## src/visualize/geoplot.py
 """
 geoplot.py
 ----------
@@ -31,15 +32,20 @@ for i in range(0, num_episodes):
 ```
 """
 
-import re
-import json
+# Standard library imports for regex parsing and JSON serialization
+import re  # regular expressions for splitting variable paths
+import json  # encode Python objects as JSON
 
-import pandas as pd
-import numpy as np
+# Third-party libraries for data manipulation
+import pandas as pd  # timestamp generation and time series handling
+import numpy as np  # numeric arrays and conversions
 
-from string import Template
-from agent_torch.core.helpers import get_by_path
+# Utilities for templating and nested state access
+from string import Template  # substitute placeholders in HTML template
+from agent_torch.core.helpers import get_by_path  # access nested state via a path
 
+# HTML template for Cesium-based visualization with placeholders:
+#   $accessToken, $data, $startTime, $stopTime, $visualType
 geoplot_template = """
 <!doctype html>
 <html lang="en">
@@ -65,25 +71,26 @@ geoplot_template = """
 	<body>
 		<div id="cesiumContainer"></div>
 		<script>
-			// Your Cesium ion access token here
+			// Ion access token placeholder
 			Cesium.Ion.defaultAccessToken = '$accessToken'
 
-			// Create the viewer
+			// Initialize Cesium viewer
 			const viewer = new Cesium.Viewer('cesiumContainer')
 
+			// Linearly interpolate between two colors based on factor
 			function interpolateColor(color1, color2, factor) {
 				const result = new Cesium.Color()
 				result.red = color1.red + factor * (color2.red - color1.red)
-				result.green =
-					color1.green + factor * (color2.green - color1.green)
+				result.green = color1.green + factor * (color2.green - color1.green)
 				result.blue = color1.blue + factor * (color2.blue - color1.blue)
 				result.alpha = '$visualType' == 'size' ? 0.2 :
 					color1.alpha + factor * (color2.alpha - color1.alpha)
 				return result
 			}
 
+			// Map a value to a color gradient from blue to red
 			function getColor(value, min, max) {
-				const factor = (value - min) / (max - min)
+				const factor = (value - min) / (max - min)  
 				return interpolateColor(
 					Cesium.Color.BLUE,
 					Cesium.Color.RED,
@@ -91,15 +98,17 @@ geoplot_template = """
 				)
 			}
 
+			// Map a value to a pixel size when visualType is 'size'
 			function getPixelSize(value, min, max) {
 				const factor = (value - min) / (max - min)
 				return 100 * (1 + factor)
 			}
 
+			// Process GeoJSON features into time-series data grouped by entity ID
 			function processTimeSeriesData(geoJsonData) {
 				const timeSeriesMap = new Map()
-				let minValue = Infinity
-				let maxValue = -Infinity
+				let minValue = Infinity  // track global min
+				let maxValue = -Infinity // track global max
 
 				geoJsonData.features.forEach((feature) => {
 					const id = feature.properties.id
@@ -109,11 +118,13 @@ geoplot_template = """
 					const value = feature.properties.value
 					const coordinates = feature.geometry.coordinates
 
+					// Initialize list for this entity if needed
 					if (!timeSeriesMap.has(id)) {
 						timeSeriesMap.set(id, [])
 					}
 					timeSeriesMap.get(id).push({ time, value, coordinates })
 
+					// Update min/max for scaling
 					minValue = Math.min(minValue, value)
 					maxValue = Math.max(maxValue, value)
 				})
@@ -121,6 +132,7 @@ geoplot_template = """
 				return { timeSeriesMap, minValue, maxValue }
 			}
 
+			// Create entities in Cesium for each ID with sampled position and styling
 			function createTimeSeriesEntities(
 				timeSeriesData,
 				startTime,
@@ -130,6 +142,7 @@ geoplot_template = """
 					'AgentTorch Simulation'
 				)
 
+				// Iterate each entity's series
 				for (const [id, timeSeries] of timeSeriesData.timeSeriesMap) {
 					const entity = new Cesium.Entity({
 						id: id,
@@ -139,7 +152,7 @@ geoplot_template = """
 								stop: stopTime,
 							}),
 						]),
-						position: new Cesium.SampledPositionProperty(),
+						position: new Cesium.SampledPositionProperty(),  // dynamic path
 						point: {
 							pixelSize: '$visualType' == 'size' ? new Cesium.SampledProperty(Number) : 10,
 							color: new Cesium.SampledProperty(Cesium.Color),
@@ -149,7 +162,9 @@ geoplot_template = """
 						},
 					})
 
+					// Add each sample (time, position, color, size)
 					timeSeries.forEach(({ time, value, coordinates }) => {
+						// Convert [lon, lat] to Cartesian3 position
 						const position = Cesium.Cartesian3.fromDegrees(
 							coordinates[0],
 							coordinates[1]
@@ -165,38 +180,42 @@ geoplot_template = """
 							)
 						)
 
+						// If visualType is size, sample pixel size as well
 						if ('$visualType' == 'size') {
-						  entity.point.pixelSize.addSample(
-  							time,
-  							getPixelSize(
-  								value,
-  								timeSeriesData.minValue,
-  								timeSeriesData.maxValue
-  							)
-  						)
+							entity.point.pixelSize.addSample(
+								time,
+								getPixelSize(
+									value,
+									timeSeriesData.minValue,
+									timeSeriesData.maxValue
+								)
+							)
 						}
 					})
 
-					dataSource.entities.add(entity)
+					dataSource.entities.add(entity)  # add to data source
 				}
 
 				return dataSource
 			}
 
-			// Example time-series GeoJSON data
+			// Load the list of GeoJSON time-series data
 			const geoJsons = $data
 
+			// Parse start/stop times for the simulation clock
 			const start = Cesium.JulianDate.fromIso8601('$startTime')
 			const stop = Cesium.JulianDate.fromIso8601('$stopTime')
 
+			// Configure viewer clock playback range and speed
 			viewer.clock.startTime = start.clone()
 			viewer.clock.stopTime = stop.clone()
 			viewer.clock.currentTime = start.clone()
 			viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP
-			viewer.clock.multiplier = 3600 // 1 hour per second
+			viewer.clock.multiplier = 3600  # simulate 1 hour per second
 
 			viewer.timeline.zoomTo(start, stop)
 
+			// Render each GeoJSON as a Cesium data source
 			for (const geoJsonData of geoJsons) {
 				const timeSeriesData = processTimeSeriesData(geoJsonData)
 				const dataSource = createTimeSeriesEntities(
@@ -212,13 +231,16 @@ geoplot_template = """
 </html>
 """
 
-
 def read_var(state, var):
+    """Retrieve a nested variable from a state dict given a slash-separated path."""
     return get_by_path(state, re.split("/", var))
 
 
 class GeoPlot:
+    """Convert simulation state trajectories into Cesium visualizations."""
+
     def __init__(self, config, options):
+        # Store simulation config and visualization settings
         self.config = config
         (
             self.cesium_token,
@@ -227,27 +249,34 @@ class GeoPlot:
             self.entity_property,
             self.visualization_type,
         ) = (
-            options["cesium_token"],
-            options["step_time"],
-            options["coordinates"],
-            options["feature"],
-            options["visualization_type"],
+            options["cesium_token"],  # Ion access token
+            options["step_time"],     # seconds between steps
+            options["coordinates"],   # path to position in state dict
+            options["feature"],       # path to property values in state dict
+            options["visualization_type"],  # 'color' or 'size'
         )
 
     def render(self, state_trajectory):
+        """Generate GeoJSON and HTML files from a list of state dicts."""
         coords, values = [], []
-        name = self.config["simulation_metadata"]["name"]
+        name = self.config["simulation_metadata"]["name"]  # base filename
         geodata_path, geoplot_path = f"{name}.geojson", f"{name}.html"
 
+        # Extract coordinates and feature values at each step
         for i in range(0, len(state_trajectory) - 1):
             final_state = state_trajectory[i][-1]
 
+            # Read the nested coordinate list and flatten to Python list
             coords = np.array(read_var(final_state, self.entity_position)).tolist()
+            # Read feature array, flatten, and store
             values.append(
-                np.array(read_var(final_state, self.entity_property)).flatten().tolist()
+                np.array(read_var(final_state, self.entity_property))
+                .flatten()
+                .tolist()
             )
 
-        start_time = pd.Timestamp.utcnow()
+        # Generate timestamps for each step in the simulation
+        start_time = pd.Timestamp.utcnow()  # use UTC now as timeline start
         timestamps = [
             start_time + pd.Timedelta(seconds=i * self.step_time)
             for i in range(
@@ -256,15 +285,18 @@ class GeoPlot:
             )
         ]
 
-        geojsons = []
+        geojsons = []  # will hold FeatureCollections for each entity
+        # Build GeoJSON features per coordinate index
         for i, coord in enumerate(coords):
             features = []
             for time, value_list in zip(timestamps, values):
+                # Create a GeoJSON Feature with geometry and time/value props
                 features.append(
                     {
                         "type": "Feature",
                         "geometry": {
                             "type": "Point",
+                            # Cesium expects [lon, lat]
                             "coordinates": [coord[1], coord[0]],
                         },
                         "properties": {
@@ -273,11 +305,14 @@ class GeoPlot:
                         },
                     }
                 )
+            # Wrap features into a FeatureCollection
             geojsons.append({"type": "FeatureCollection", "features": features})
 
+        # Write GeoJSON data to file for later loading in HTML
         with open(geodata_path, "w", encoding="utf-8") as f:
             json.dump(geojsons, f, ensure_ascii=False, indent=2)
 
+        # Fill HTML template placeholders and write out the final viewer page
         tmpl = Template(geoplot_template)
         with open(geoplot_path, "w", encoding="utf-8") as f:
             f.write(
