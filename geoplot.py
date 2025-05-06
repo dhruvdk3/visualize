@@ -1,4 +1,3 @@
-## src/visualize/geoplot.py
 """
 geoplot.py
 ----------
@@ -42,197 +41,210 @@ import numpy as np  # numeric arrays and conversions
 
 # Utilities for templating and nested state access
 from string import Template  # substitute placeholders in HTML template
-from agent_torch.core.helpers import get_by_path  # access nested state via a path
+# access nested state via a path
+from agent_torch.core.helpers import get_by_path
 
 # HTML template for Cesium-based visualization with placeholders:
 #   $accessToken, $data, $startTime, $stopTime, $visualType
 geoplot_template = """
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1.0"
-		/>
-		<title>Cesium Time-Series Heatmap Visualization</title>
-		<script src="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Cesium.js"></script>
-		<link
-			href="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Widgets/widgets.css"
-			rel="stylesheet"
-		/>
-		<style>
-			#cesiumContainer {
-				width: 100%;
-				height: 100%;
-			}
-		</style>
-	</head>
-	<body>
-		<div id="cesiumContainer"></div>
-		<script>
-			// Ion access token placeholder
-			Cesium.Ion.defaultAccessToken = '$accessToken'
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0"
+        />
+        <title>Cesium Time-Series Heatmap Visualization</title>
+        <script
+            src="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Cesium.js">
+        </script>
+        <link
+            href="https://cesium.com/downloads/cesiumjs/releases/1.95/Build/Cesium/Widgets/widgets.css"
+            rel="stylesheet"
+        />
+        <style>
+            #cesiumContainer {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="cesiumContainer"></div>
+        <script>
+            // Ion access token placeholder
+            Cesium.Ion.defaultAccessToken = '$accessToken'
 
-			// Initialize Cesium viewer
-			const viewer = new Cesium.Viewer('cesiumContainer')
+            // Initialize Cesium viewer
+            const viewer = new Cesium.Viewer('cesiumContainer')
 
-			// Linearly interpolate between two colors based on factor
-			function interpolateColor(color1, color2, factor) {
-				const result = new Cesium.Color()
-				result.red = color1.red + factor * (color2.red - color1.red)
-				result.green = color1.green + factor * (color2.green - color1.green)
-				result.blue = color1.blue + factor * (color2.blue - color1.blue)
-				result.alpha = '$visualType' == 'size' ? 0.2 :
-					color1.alpha + factor * (color2.alpha - color1.alpha)
-				return result
-			}
+            // Linearly interpolate between two colors based on factor
+            function interpolateColor(color1, color2, factor) {
+                const result = new Cesium.Color()
+                result.red = color1.red + factor * (color2.red - color1.red)
+                result.green = color1.green + factor *
+                                (color2.green - color1.green)
+                result.blue = color1.blue + factor *
+                                (color2.blue - color1.blue)
+                result.alpha = '$visualType' == 'size' ? 0.2 :
+                    color1.alpha + factor * (color2.alpha - color1.alpha)
+                return result
+            }
 
-			// Map a value to a color gradient from blue to red
-			function getColor(value, min, max) {
-				const factor = (value - min) / (max - min)  
-				return interpolateColor(
-					Cesium.Color.BLUE,
-					Cesium.Color.RED,
-					factor
-				)
-			}
+            // Map a value to a color gradient from blue to red
+            function getColor(value, min, max) {
+                const factor = (value - min) / (max - min)
+                return interpolateColor(
+                    Cesium.Color.BLUE,
+                    Cesium.Color.RED,
+                    factor
+                )
+            }
 
-			// Map a value to a pixel size when visualType is 'size'
-			function getPixelSize(value, min, max) {
-				const factor = (value - min) / (max - min)
-				return 100 * (1 + factor)
-			}
+            // Map a value to a pixel size when visualType is 'size'
+            function getPixelSize(value, min, max) {
+                const factor = (value - min) / (max - min)
+                return 100 * (1 + factor)
+            }
 
-			// Process GeoJSON features into time-series data grouped by entity ID
-			function processTimeSeriesData(geoJsonData) {
-				const timeSeriesMap = new Map()
-				let minValue = Infinity  // track global min
-				let maxValue = -Infinity // track global max
+            // Convert GeoJSON features to time-series by entity ID
+            function processTimeSeriesData(geoJsonData) {
+                const timeSeriesMap = new Map()
+                let minValue = Infinity  // track global min
+                let maxValue = -Infinity // track global max
 
-				geoJsonData.features.forEach((feature) => {
-					const id = feature.properties.id
-					const time = Cesium.JulianDate.fromIso8601(
-						feature.properties.time
-					)
-					const value = feature.properties.value
-					const coordinates = feature.geometry.coordinates
+                geoJsonData.features.forEach((feature) => {
+                    const id = feature.properties.id
+                    const time = Cesium.JulianDate.fromIso8601(
+                        feature.properties.time
+                    )
+                    const value = feature.properties.value
+                    const coordinates = feature.geometry.coordinates
 
-					// Initialize list for this entity if needed
-					if (!timeSeriesMap.has(id)) {
-						timeSeriesMap.set(id, [])
-					}
-					timeSeriesMap.get(id).push({ time, value, coordinates })
+                    // Initialize list for this entity if needed
+                    if (!timeSeriesMap.has(id)) {
+                        timeSeriesMap.set(id, [])
+                    }
+                    timeSeriesMap.get(id).push({ time, value, coordinates })
 
-					// Update min/max for scaling
-					minValue = Math.min(minValue, value)
-					maxValue = Math.max(maxValue, value)
-				})
+                    // Update min/max for scaling
+                    minValue = Math.min(minValue, value)
+                    maxValue = Math.max(maxValue, value)
+                })
 
-				return { timeSeriesMap, minValue, maxValue }
-			}
+                return { timeSeriesMap, minValue, maxValue }
+            }
 
-			// Create entities in Cesium for each ID with sampled position and styling
-			function createTimeSeriesEntities(
-				timeSeriesData,
-				startTime,
-				stopTime
-			) {
-				const dataSource = new Cesium.CustomDataSource(
-					'AgentTorch Simulation'
-				)
+            // Create Cesium entities for each ID with position and style
+            function createTimeSeriesEntities(
+                timeSeriesData,
+                startTime,
+                stopTime
+            ) {
+                const dataSource = new Cesium.CustomDataSource(
+                    'AgentTorch Simulation'
+                )
 
-				// Iterate each entity's series
-				for (const [id, timeSeries] of timeSeriesData.timeSeriesMap) {
-					const entity = new Cesium.Entity({
-						id: id,
-						availability: new Cesium.TimeIntervalCollection([
-							new Cesium.TimeInterval({
-								start: startTime,
-								stop: stopTime,
-							}),
-						]),
-						position: new Cesium.SampledPositionProperty(),  // dynamic path
-						point: {
-							pixelSize: '$visualType' == 'size' ? new Cesium.SampledProperty(Number) : 10,
-							color: new Cesium.SampledProperty(Cesium.Color),
-						},
-						properties: {
-							value: new Cesium.SampledProperty(Number),
-						},
-					})
+                // Iterate each entity's series
+                for (const [id, timeSeries] of timeSeriesData.timeSeriesMap) {
+                    const entity = new Cesium.Entity({
+                        id: id,
+                        availability: new Cesium.TimeIntervalCollection([
+                            new Cesium.TimeInterval({
+                                start: startTime,
+                                stop: stopTime,
+                            }),
+                        ]),
+                        position:
+                            // dynamic path
+                            new Cesium.SampledPositionProperty(),
+                        point: {
+                            pixelSize:
+                                '$visualType' == 'size'
+                                ? new Cesium.SampledProperty(Number)
+                                : 10,
+                            color: new Cesium.SampledProperty(Cesium.Color),
+                        },
+                        properties: {
+                            value: new Cesium.SampledProperty(Number),
+                        },
+                    })
 
-					// Add each sample (time, position, color, size)
-					timeSeries.forEach(({ time, value, coordinates }) => {
-						// Convert [lon, lat] to Cartesian3 position
-						const position = Cesium.Cartesian3.fromDegrees(
-							coordinates[0],
-							coordinates[1]
-						)
-						entity.position.addSample(time, position)
-						entity.properties.value.addSample(time, value)
-						entity.point.color.addSample(
-							time,
-							getColor(
-								value,
-								timeSeriesData.minValue,
-								timeSeriesData.maxValue
-							)
-						)
+                    // Add each sample (time, position, color, size)
+                    timeSeries.forEach(({ time, value, coordinates }) => {
+                        // Convert [lon, lat] to Cartesian3 position
+                        const position = Cesium.Cartesian3.fromDegrees(
+                            coordinates[0],
+                            coordinates[1]
+                        )
+                        entity.position.addSample(time, position)
+                        entity.properties.value.addSample(time, value)
+                        entity.point.color.addSample(
+                            time,
+                            getColor(
+                                value,
+                                timeSeriesData.minValue,
+                                timeSeriesData.maxValue
+                            )
+                        )
 
-						// If visualType is size, sample pixel size as well
-						if ('$visualType' == 'size') {
-							entity.point.pixelSize.addSample(
-								time,
-								getPixelSize(
-									value,
-									timeSeriesData.minValue,
-									timeSeriesData.maxValue
-								)
-							)
-						}
-					})
+                        // If visualType is size, sample pixel size as well
+                        if ('$visualType' == 'size') {
+                            entity.point.pixelSize.addSample(
+                                time,
+                                getPixelSize(
+                                    value,
+                                    timeSeriesData.minValue,
+                                    timeSeriesData.maxValue
+                                )
+                            )
+                        }
+                    })
 
-					dataSource.entities.add(entity)  # add to data source
-				}
+                    dataSource.entities.add(entity)
+                }
 
-				return dataSource
-			}
+                return dataSource
+            }
 
-			// Load the list of GeoJSON time-series data
-			const geoJsons = $data
+            // Load the list of GeoJSON time-series data
+            const geoJsons = $data
 
-			// Parse start/stop times for the simulation clock
-			const start = Cesium.JulianDate.fromIso8601('$startTime')
-			const stop = Cesium.JulianDate.fromIso8601('$stopTime')
+            // Parse start/stop times for the simulation clock
+            const start = Cesium.JulianDate.fromIso8601('$startTime')
+            const stop = Cesium.JulianDate.fromIso8601('$stopTime')
 
-			// Configure viewer clock playback range and speed
-			viewer.clock.startTime = start.clone()
-			viewer.clock.stopTime = stop.clone()
-			viewer.clock.currentTime = start.clone()
-			viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP
-			viewer.clock.multiplier = 3600  # simulate 1 hour per second
+            // Configure viewer clock playback range and speed
+            viewer.clock.startTime = start.clone()
+            viewer.clock.stopTime = stop.clone()
+            viewer.clock.currentTime = start.clone()
+            viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP
+            viewer.clock.multiplier = 3600
 
-			viewer.timeline.zoomTo(start, stop)
+            viewer.timeline.zoomTo(start, stop)
 
-			// Render each GeoJSON as a Cesium data source
-			for (const geoJsonData of geoJsons) {
-				const timeSeriesData = processTimeSeriesData(geoJsonData)
-				const dataSource = createTimeSeriesEntities(
-					timeSeriesData,
-					start,
-					stop
-				)
-				viewer.dataSources.add(dataSource)
-				viewer.zoomTo(dataSource)
-			}
-		</script>
-	</body>
+            // Render each GeoJSON as a Cesium data source
+            for (const geoJsonData of geoJsons) {
+                const timeSeriesData = processTimeSeriesData(geoJsonData)
+                const dataSource = createTimeSeriesEntities(
+                    timeSeriesData,
+                    start,
+                    stop
+                )
+                viewer.dataSources.add(dataSource)
+                viewer.zoomTo(dataSource)
+            }
+        </script>
+    </body>
 </html>
 """
 
+
 def read_var(state, var):
-    """Retrieve a nested variable from a state dict given a slash-separated path."""
+    """
+    Retrieve a nested variable from a state dict given a slash-separated path.
+    """
     return get_by_path(state, re.split("/", var))
 
 
@@ -267,7 +279,10 @@ class GeoPlot:
             final_state = state_trajectory[i][-1]
 
             # Read the nested coordinate list and flatten to Python list
-            coords = np.array(read_var(final_state, self.entity_position)).tolist()
+            coords = np.array(
+                read_var(
+                    final_state,
+                    self.entity_position)).tolist()
             # Read feature array, flatten, and store
             values.append(
                 np.array(read_var(final_state, self.entity_property))
@@ -306,7 +321,8 @@ class GeoPlot:
                     }
                 )
             # Wrap features into a FeatureCollection
-            geojsons.append({"type": "FeatureCollection", "features": features})
+            geojsons.append(
+                {"type": "FeatureCollection", "features": features})
 
         # Write GeoJSON data to file for later loading in HTML
         with open(geodata_path, "w", encoding="utf-8") as f:
